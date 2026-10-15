@@ -57,10 +57,20 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
  const [chatError,setChatError]=useState('');
  const [attachScreen,setAttachScreen]=useState(false);
  const [connectionState,setConnectionState]=useState('not-tested');
+ const [endpointReady,setEndpointReady]=useState(false);
  const [activeTab,setActiveTab]=useState('chat');
  const [showHelp,setShowHelp]=useState(false);
  const context=useMemo(()=>({sid:clean(sapSid,12)||'DEV',client:clean(sapClient,3)||'100',env:sapEnv,tcode:clean(tcode,30)}),[sapSid,sapClient,sapEnv,tcode]);
  const storageKey=PREFIX+'_'+(session?.user?.id||'demo')+'_'+context.sid+'_'+context.client;
+ useEffect(()=>{
+  let active=true;
+  setEndpointReady(false);
+  if(!session?.access_token||!supabase)return;
+  supabase.functions.invoke('erp-copilot-chat',{method:'GET'})
+    .then(({data,error})=>{if(active)setEndpointReady(!error&&data?.ready===true)})
+    .catch(()=>{if(active)setEndpointReady(false)});
+  return()=>{active=false};
+ },[session?.access_token,supabase]);
  useEffect(()=>{
   try{const j=JSON.parse(sessionStorage.getItem(storageKey)||'{}');setMessages(Array.isArray(j.messages)?j.messages.slice(-24):[]);setNotes(clean(j.notes||'',1000));setTcode(clean(j.tcode||'',30))}catch{setMessages([]);setNotes('');}
  },[storageKey]);
@@ -113,6 +123,7 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
   if(!q||sending)return;
   setChatError('');
   if(!session?.access_token||!supabase){onSignIn?.();setChatError('Για πραγματικό AI chat χρειάζεται η δική σου επιβεβαιωμένη σύνδεση ERP. Δεν ζητάμε SAP password.');return}
+  if(!endpointReady){setChatError('Το live DeepSeek backend είναι ακόμη ανενεργό. Κανένα screenshot ή ερώτημα δεν στάλθηκε στον server. Χρησιμοποίησε προσωρινά Offline guide.');return}
   if(attachScreen&&(!capture||!sensitiveOk)){setActiveTab('screen');setChatError('Capture frame, κάλυψε εμπιστευτικά στοιχεία και επίλεξε ότι έλεγξες την εικόνα.');return}
   const history=messages.filter(m=>m.role==='user'||m.role==='assistant').slice(-8).map(m=>({role:m.role,content:m.content}));
   setSending(true);
@@ -163,7 +174,7 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
     <div className="info"><ShieldCheck size={18}/><span>Browser screen sharing is local. No live screenshots are automatically uploaded or analyzed. Use Capture frame only when the screen contains no passwords or restricted business data.</span></div>
    </section>
    <section className="panel live-chat">
-    <div className="sectiontitle"><div><h2><BrainCircuit size={17} style={{verticalAlign:'middle',marginRight:8}}/> SAP Conversation</h2><p>System-aware chat + session history</p></div><span className={'status '+(connectionState==='available'?'status-ok':'status-warn')}>{connectionState==='available'?'AI CONNECTED':'AI NOT VERIFIED'}</span></div>
+    <div className="sectiontitle"><div><h2><BrainCircuit size={17} style={{verticalAlign:'middle',marginRight:8}}/> SAP Conversation</h2><p>System-aware chat + session history</p></div><span className={'status '+(connectionState==='available'?'status-ok':'status-warn')}>{endpointReady?'AI READY':'AI OFFLINE'}</span></div>
     <div className="live-tabs"><button className={activeTab==='chat'?'active':''} onClick={()=>setActiveTab('chat')}><MessageCircle size={15}/> Chat</button><button className={activeTab==='screen'?'active':''} onClick={()=>setActiveTab('screen')}><Camera size={15}/> Screen review</button><button className={activeTab==='memory'?'active':''} onClick={()=>setActiveTab('memory')}><FileText size={15}/> Memory</button></div>
     {activeTab==='chat'&&<div className="live-chatbox">
       <div className="chat-feed" role="log" aria-live="polite">
@@ -195,7 +206,7 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
       </>}
      </div>}
     {activeTab==='memory'&&<div className="memory-panel"><div className="min-row"><span>System / Client</span><b>{context.sid} / {context.client}</b></div><div className="min-row"><span>Environment</span><b>{context.env}</b></div><div className="min-row"><span>Transaction</span><b>{context.tcode||'Not specified'}</b></div><div className="min-row"><span>Messages</span><b>{messages.length}</b></div><p className="note">Memory is stored only in this browser tab (sessionStorage) under the selected account and system. Screenshots are not saved. This is not yet persistent encrypted enterprise memory.</p><button className="button danger" onClick={reset}><Trash2 size={15}/> Clear session memory</button></div>}
-    <div className="connection-strip"><span><WifiOff size={14}/> AI access: {connectionState==='available'?'Verified this session':connectionState==='unavailable'?'Unavailable':'Not yet tested'}</span><span><ShieldCheck size={14}/> No SAP writes</span></div>
+    <div className="connection-strip"><span><WifiOff size={14}/> AI access: {endpointReady?'Available for approved queries':'Disabled — no uploads'}</span><span><ShieldCheck size={14}/> No SAP writes</span></div>
    </section>
   </div>
   {!!lastAction&&<p className="note">{lastAction}</p>}
