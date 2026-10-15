@@ -58,6 +58,14 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
  const [attachScreen,setAttachScreen]=useState(false);
  const [connectionState,setConnectionState]=useState('not-tested');
  const [endpointReady,setEndpointReady]=useState(false);
+ const [provider,setProvider]=useState('deepseek');
+ const [model,setModel]=useState('deepseek-flash');
+ const [customModel,setCustomModel]=useState('');
+ const [catalog,setCatalog]=useState([]);
+ const [providerStatuses,setProviderStatuses]=useState({});
+ const currentModelId=model==='custom'?customModel.trim():model;
+ const chosenCapability=catalog.find(m=>m.provider===provider&&m.id===currentModelId);
+ const canReadScreen=!!chosenCapability?.vision;
  const [activeTab,setActiveTab]=useState('chat');
  const [showHelp,setShowHelp]=useState(false);
  const context=useMemo(()=>({sid:clean(sapSid,12)||'DEV',client:clean(sapClient,3)||'100',env:sapEnv,tcode:clean(tcode,30)}),[sapSid,sapClient,sapEnv,tcode]);
@@ -67,7 +75,12 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
   setEndpointReady(false);
   if(!session?.access_token||!supabase)return;
   supabase.functions.invoke('erp-copilot-chat',{method:'GET'})
-    .then(({data,error})=>{if(active)setEndpointReady(!error&&data?.ready===true)})
+    .then(({data,error})=>{
+      if(!active||error)return;
+      const list=Array.isArray(data?.models)?data.models:[];
+      const states=Object.fromEntries((data?.providers||[]).map(p=>[p.id,p.ready===true]));
+      setCatalog(list);setProviderStatuses(states);setEndpointReady(data?.ready===true);
+    })
     .catch(()=>{if(active)setEndpointReady(false)});
   return()=>{active=false};
  },[session?.access_token,supabase]);
@@ -123,7 +136,9 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
   if(!q||sending)return;
   setChatError('');
   if(!session?.access_token||!supabase){onSignIn?.();setChatError('Για πραγματικό AI chat χρειάζεται η δική σου επιβεβαιωμένη σύνδεση ERP. Δεν ζητάμε SAP password.');return}
-  if(!endpointReady){setChatError('Το live DeepSeek backend είναι ακόμη ανενεργό. Κανένα screenshot ή ερώτημα δεν στάλθηκε στον server. Χρησιμοποίησε προσωρινά Offline guide.');return}
+  if(!endpointReady||!providerStatuses[provider]){setChatError('Ο πάροχος '+provider+' δεν είναι ακόμη ενεργός στον ασφαλή server. Δεν στάλθηκε η ερώτηση ή screenshot. Χρησιμοποίησε Offline guide.');return}
+  if(!currentModelId){setChatError('Επίλεξε μοντέλο για να συνεχίσεις.');return}
+  if(attachScreen&&!canReadScreen){setChatError('Αυτό το μοντέλο δεν έχει επιβεβαιωμένη υποστήριξη screenshot. Επίλεξε μοντέλο Vision.');return}
   if(attachScreen&&(!capture||!sensitiveOk)){setActiveTab('screen');setChatError('Capture frame, κάλυψε εμπιστευτικά στοιχεία και επίλεξε ότι έλεγξες την εικόνα.');return}
   const history=messages.filter(m=>m.role==='user'||m.role==='assistant').slice(-8).map(m=>({role:m.role,content:m.content}));
   setSending(true);
@@ -132,7 +147,7 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
   try{
    const {data,error}=await supabase.functions.invoke('erp-copilot-chat',{body:{
      purpose:'sap-dev-qas-copilot',dataClassification:'redacted-approved',
-     message:q,context:{sid:context.sid,client:context.client,environment:context.env,tcode:context.tcode},
+     message:q,provider,model:currentModelId,context:{sid:context.sid,client:context.client,environment:context.env,tcode:context.tcode},
      history,
      image:attachScreen?capture:undefined,imageConsent:attachScreen&&sensitiveOk
    }});
@@ -145,9 +160,9 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
       :'Η ζωντανή σύνδεση AI δεν ολοκληρώθηκε ('+(reason||'endpoint_unavailable')+'). Δεν εμφανίζουμε τοπικές οδηγίες ως απάντηση LLM.';
      setChatError(info);
    }else{
-     setMessages(m=>[...m,{role:'assistant',content:clean(data.answer,9000),time:Date.now(),screen:!!data.usedScreen}].slice(-24));
+     setMessages(m=>[...m,{role:'assistant',content:clean(data.answer,9000),time:Date.now(),screen:!!data.usedScreen,provider:data.provider,model:data.model}].slice(-24));
      setConnectionState('available');
-     setLastAction(data.usedScreen?'DeepSeek analyzed the screenshot you explicitly approved.':'DeepSeek answered using text and declared SAP context; no screen was transmitted.');
+     setLastAction(data.usedScreen?'Το '+(data.model||'AI')+' ανέλυσε το screenshot που ενέκρινες.':(data.model||'AI')+' απάντησε με κείμενο και δηλωμένο SAP context — χωρίς αποστολή εικόνας.');
    }
   }catch{setChatError('Δεν ολοκληρώθηκε η AI κλήση. Τα στοιχεία της συνεδρίας παραμένουν στο browser.');setConnectionState('unavailable')}
   finally{setSending(false);setAttachScreen(false)}
@@ -175,18 +190,42 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
    </section>
    <section className="panel live-chat">
     <div className="sectiontitle"><div><h2><BrainCircuit size={17} style={{verticalAlign:'middle',marginRight:8}}/> SAP Conversation</h2><p>System-aware chat + session history</p></div><span className={'status '+(connectionState==='available'?'status-ok':'status-warn')}>{endpointReady?'AI READY':'AI OFFLINE'}</span></div>
+    
+    <div className="model-picker">
+      <div className="model-picker-title"><BrainCircuit size={15}/> AI Model Selection <span className={'status '+(providerStatuses[provider]?'status-ok':'status-warn')}>{providerStatuses[provider]?'BACKEND READY':'NOT CONFIGURED'}</span></div>
+      <div className="model-picker-fields">
+        <label>Provider<select value={provider} onChange={e=>{
+          const selected=e.target.value;
+          setProvider(selected);
+          const first=catalog.find(m=>m.provider===selected);
+          setModel(first?.id||(selected==='openai'?'gpt-4.1-mini':selected==='huggingface'?'openai/gpt-oss-120b':'deepseek-flash'));
+          setAttachScreen(false);
+        }}><option value="deepseek">DeepSeek</option><option value="openai">OpenAI</option><option value="huggingface">Hugging Face</option></select></label>
+        <label>Model<select value={model} onChange={e=>{setModel(e.target.value);setAttachScreen(false)}}>
+          {(catalog.length?catalog:[
+            {provider:'deepseek',id:'deepseek-flash',label:'DeepSeek Flash'},
+            {provider:'openai',id:'gpt-4.1-mini',label:'GPT-4.1 mini'},
+            {provider:'openai',id:'gpt-4o-mini',label:'GPT-4o mini'},
+            {provider:'huggingface',id:'openai/gpt-oss-120b',label:'GPT-OSS 120B'}
+          ]).filter(m=>m.provider===provider).map(m=><option key={m.id} value={m.id}>{m.label||m.id}{m.vision?' · Vision':''}</option>)}
+          <option value="custom">Other model ID (text only)</option>
+        </select></label>
+      </div>
+      {model==='custom'&&<label className="model-custom">Custom model ID<input value={customModel} maxLength={160} onChange={e=>setCustomModel(e.target.value)} placeholder={provider==='huggingface'?'author/model-name':'provider model id'}/></label>}
+      <div className="model-picker-note">{canReadScreen?'Image + text supported by selected model.':'Text mode. For SAP screenshots, select an approved Vision model.'} Το ιστορικό παραμένει στην ίδια συνεδρία.</div>
+    </div>
     <div className="live-tabs"><button className={activeTab==='chat'?'active':''} onClick={()=>setActiveTab('chat')}><MessageCircle size={15}/> Chat</button><button className={activeTab==='screen'?'active':''} onClick={()=>setActiveTab('screen')}><Camera size={15}/> Screen review</button><button className={activeTab==='memory'?'active':''} onClick={()=>setActiveTab('memory')}><FileText size={15}/> Memory</button></div>
     {activeTab==='chat'&&<div className="live-chatbox">
       <div className="chat-feed" role="log" aria-live="polite">
        {!messages.length&&<div className="chat-empty"><BrainCircuit size={30}/><h3>Ready for your SAP question</h3><p>Ρώτησε τον AI consultant για το SAP σου. Η πρόσβαση στο μοντέλο απαιτεί ενεργοποίηση του ασφαλούς backend. Μπορείς να χρησιμοποιήσεις και τις τοπικές οδηγίες όσο είναι ανενεργό.</p></div>}
-       {messages.map((m,i)=><article key={i} className={'chat-bubble '+(m.role==='user'?'human':'assistant')}><div className="chat-role">{m.role==='user'?'YOU':m.role==='assistant'?'DEEPSEEK · AI SAP CONSULTANT':'LOCAL GUIDED CHECK · NOT LLM'}</div><div className="chat-text">{m.content}</div></article>)}
+       {messages.map((m,i)=><article key={i} className={'chat-bubble '+(m.role==='user'?'human':'assistant')}><div className="chat-role">{m.role==='user'?'YOU':m.role==='assistant'?(m.provider||'MODEL')+' · '+(m.model||'AI SAP CONSULTANT'):'LOCAL GUIDED CHECK · NOT LLM'}</div><div className="chat-text">{m.content}</div></article>)}
       </div>
       <div className="quick-prompts">{CHOICES.map(([label,q])=><button key={label} onClick={()=>setQuestion(q)}>{label}</button>)}</div>
       <div className="chat-composer">
        <textarea rows={3} value={question} maxLength={1600} onChange={e=>setQuestion(e.target.value)} placeholder="Ρώτησε τον SAP Consultant: Τι βλέπεις; Πού να πατήσω; Τι σημαίνει το σφάλμα;"/>
        <div className="chat-capture">
          <button className="button ghost" disabled={!stream} onClick={()=>{snapshot();setActiveTab('screen')}}><Camera size={14}/> Capture & mask</button>
-         <label className="checkbox"><input type="checkbox" disabled={!capture||!sensitiveOk} checked={attachScreen} onChange={e=>setAttachScreen(e.target.checked)}/> Send reviewed screen with next question</label>
+         <label className="checkbox"><input type="checkbox" disabled={!capture||!sensitiveOk||!canReadScreen} checked={attachScreen} onChange={e=>setAttachScreen(e.target.checked)}/> Send reviewed screen with next question</label>
        </div>
        {chatError&&<p className="error" role="alert">{chatError}</p>}
        <div className="chat-actions">
@@ -206,7 +245,7 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
       </>}
      </div>}
     {activeTab==='memory'&&<div className="memory-panel"><div className="min-row"><span>System / Client</span><b>{context.sid} / {context.client}</b></div><div className="min-row"><span>Environment</span><b>{context.env}</b></div><div className="min-row"><span>Transaction</span><b>{context.tcode||'Not specified'}</b></div><div className="min-row"><span>Messages</span><b>{messages.length}</b></div><p className="note">Memory is stored only in this browser tab (sessionStorage) under the selected account and system. Screenshots are not saved. This is not yet persistent encrypted enterprise memory.</p><button className="button danger" onClick={reset}><Trash2 size={15}/> Clear session memory</button></div>}
-    <div className="connection-strip"><span><WifiOff size={14}/> AI access: {endpointReady?'Available for approved queries':'Disabled — no uploads'}</span><span><ShieldCheck size={14}/> No SAP writes</span></div>
+    <div className="connection-strip"><span><WifiOff size={14}/> {provider} · {model==='custom'?customModel:model} · {providerStatuses[provider]?'Active':'Not configured'}</span><span><ShieldCheck size={14}/> No SAP writes</span></div>
    </section>
   </div>
   {!!lastAction&&<p className="note">{lastAction}</p>}
