@@ -1,6 +1,6 @@
 # ERP Intelligence AI — SAP Diagnostic Copilot
 
-> **Status: discovery / source baseline. Not deployed or connected to a real SAP system.**
+> **Status (2026-10-15): Vercel SaaS pilot v0.7 deployed at https://erp-intelligence-ai.vercel.app/ ; it is SSO-protected and synthetic-only. No actual SAP connection, cross-tenant commercial SaaS backend, or live AI provider integration is ready.**
 
 This repository is the home for the ERP Intelligence AI product, initially focused on SAP R/3 and ECC. We are reviewing an existing Google AI Studio React/Express prototype before selecting the production product requirements and architecture.
 
@@ -12,6 +12,13 @@ This repository is the home for the ERP Intelligence AI product, initially focus
 - AI-generated ABAP or configuration advice **only**, no automatic code execution or SAP writes.
 - Infrastructure under consideration: Vercel + Supabase PostgreSQL, with tenant isolation, restricted ingestion and audit history.
 - Go-to-market: self-service; availability and commercial viability still require validation.
+
+## Hosted SaaS pilot
+
+- [Vercel staging app](https://erp-intelligence-ai.vercel.app/) — actual successful production build, Vercel Auth protection enabled.
+- [React/Vite source](./saas/) — company-style Mission Control, Supabase magic link, approved JSON local preview, live SAP GUI window capture (view-only), diagnostics, modules and export.
+- [Deployment acceptance status](./docs/VERCEL_SAAS_DEPLOYMENT_v0.7.md) — confirms exact completed versus pending scope.
+- The app is **not** a replacement for the full original AI Studio source; original ABAP Studio and all legacy features are pending safe migration.
 
 ## Source baseline
 
