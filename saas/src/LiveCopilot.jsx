@@ -36,7 +36,7 @@ function guide(q,ctx){
  ];
  return [...base,'',...lines,'','For contextual interpretation by a live LLM, a separately authorized and tested model gateway is required.'];
 }
-export default function LiveCopilot({session,snap,onSignIn}){
+export default function LiveCopilot({session,snap,onSignIn,supabase}){
  const [stream,setStream]=useState(null);
  const streamRef=useRef(null),videoRef=useRef(null),canvasRef=useRef(null),previewRef=useRef(null);
  const [captureError,setCaptureError]=useState('');
@@ -53,6 +53,10 @@ export default function LiveCopilot({session,snap,onSignIn}){
  const [messages,setMessages]=useState([]);
  const [sensitiveOk,setSensitiveOk]=useState(false);
  const [lastAction,setLastAction]=useState('');
+ const [sending,setSending]=useState(false);
+ const [chatError,setChatError]=useState('');
+ const [attachScreen,setAttachScreen]=useState(false);
+ const [connectionState,setConnectionState]=useState('not-tested');
  const [activeTab,setActiveTab]=useState('chat');
  const [showHelp,setShowHelp]=useState(false);
  const context=useMemo(()=>({sid:clean(sapSid,12)||'DEV',client:clean(sapClient,3)||'100',env:sapEnv,tcode:clean(tcode,30)}),[sapSid,sapClient,sapEnv,tcode]);
@@ -104,6 +108,39 @@ export default function LiveCopilot({session,snap,onSignIn}){
   setMessages(m=>[...m,{role:'user',content:q,time:Date.now()},{role:'guide',content:guide(q,context).join('\n'),time:Date.now()}].slice(-24));
   setQuestion('');setActiveTab('chat');
  };
+ const sendToAI=async()=>{
+  const q=clean(question,1600);
+  if(!q||sending)return;
+  setChatError('');
+  if(!session?.access_token||!supabase){onSignIn?.();setChatError('Για πραγματικό AI chat χρειάζεται η δική σου επιβεβαιωμένη σύνδεση ERP. Δεν ζητάμε SAP password.');return}
+  if(attachScreen&&(!capture||!sensitiveOk)){setActiveTab('screen');setChatError('Capture frame, κάλυψε εμπιστευτικά στοιχεία και επίλεξε ότι έλεγξες την εικόνα.');return}
+  const history=messages.filter(m=>m.role==='user'||m.role==='assistant').slice(-8).map(m=>({role:m.role,content:m.content}));
+  setSending(true);
+  setMessages(m=>[...m,{role:'user',content:q+(attachScreen?' [Επισυνάφθηκε εγκεκριμένη εικόνα SAP]':''),time:Date.now()}].slice(-24));
+  setQuestion('');
+  try{
+   const {data,error}=await supabase.functions.invoke('erp-copilot-chat',{body:{
+     purpose:'sap-dev-qas-copilot',dataClassification:'redacted-approved',
+     message:q,context:{sid:context.sid,client:context.client,environment:context.env,tcode:context.tcode},
+     history,
+     image:attachScreen?capture:undefined,imageConsent:attachScreen&&sensitiveOk
+   }});
+   if(error||!data?.answer){
+     let reason=data?.error||'';
+     try{if(error?.context?.json){const body=await error.context.json();reason=body?.message||body?.error||reason}}catch{}
+     setConnectionState('unavailable');
+     const info=reason==='copilot_not_enabled'
+      ?'Το ασφαλές AI endpoint είναι εγκατεστημένο, αλλά δεν έχει ενεργοποιηθεί ακόμη το server-only κλειδί και τα όρια κόστους.'
+      :'Η ζωντανή σύνδεση AI δεν ολοκληρώθηκε ('+(reason||'endpoint_unavailable')+'). Δεν εμφανίζουμε τοπικές οδηγίες ως απάντηση LLM.';
+     setChatError(info);
+   }else{
+     setMessages(m=>[...m,{role:'assistant',content:clean(data.answer,9000),time:Date.now(),screen:!!data.usedScreen}].slice(-24));
+     setConnectionState('available');
+     setLastAction(data.usedScreen?'DeepSeek analyzed the screenshot you explicitly approved.':'DeepSeek answered using text and declared SAP context; no screen was transmitted.');
+   }
+  }catch{setChatError('Δεν ολοκληρώθηκε η AI κλήση. Τα στοιχεία της συνεδρίας παραμένουν στο browser.');setConnectionState('unavailable')}
+  finally{setSending(false);setAttachScreen(false)}
+ };
  const exportContext=()=>{
   const body=['ERP Intelligence SAP session diagnostic package','System: '+context.sid,'Client: '+context.client,'Environment: '+context.env,'Transaction: '+(context.tcode||'not entered'),
    'Notes (manually sanitized): '+clean(notes,1000),'Question: '+clean(question,1600),'','No automatic live SAP database connection. Screen content not included. Never paste SAP passwords or private data.'].join('\n');
@@ -111,7 +148,7 @@ export default function LiveCopilot({session,snap,onSignIn}){
  };
  const reset=()=>{setMessages([]);setNotes('');setQuestion('');sessionStorage.removeItem(storageKey);setLastAction('Session messages and notes cleared from this browser tab.');};
  return <div className="liveapp">
-  <div className="banner slim"><div><span className="eyebrow">SAP LIVE WORKSPACE / COPILOT WORKBENCH</span><h3>Work in SAP with an AI conversation beside you</h3><p>Controlled browser session: one SAP GUI window, SAP context, local session history, guided checks and prepared screen review. Model inference is not connected yet.</p></div><span className={'status '+(stream?'status-ok':'status-warn')}>{stream?'WINDOW SHARING':'NO SAP WINDOW'}</span></div>
+  <div className="banner slim"><div><span className="eyebrow">SAP LIVE WORKSPACE / COPILOT WORKBENCH</span><h3>Work in SAP with an AI conversation beside you</h3><p>Πραγματικό SAP window αριστερά, SAP Consultant chat δεξιά. Στείλε επιλεγμένο και καθαρισμένο frame όταν το AI χρειάζεται να δει την οθόνη. Δεν υπάρχει άμεσο SAP RFC/GUI control.</p></div><span className={'status '+(stream?'status-ok':'status-warn')}>{stream?'WINDOW SHARING':'NO SAP WINDOW'}</span></div>
   <div className="live-body">
    <section className="panel live-view">
     <div className="sectiontitle"><div><h2><Monitor size={16} style={{verticalAlign:'middle',marginRight:8}}/> SAP GUI window</h2><p>{context.sid} · Client {context.client} · {context.env} · Read-only view</p></div>
@@ -126,27 +163,39 @@ export default function LiveCopilot({session,snap,onSignIn}){
     <div className="info"><ShieldCheck size={18}/><span>Browser screen sharing is local. No live screenshots are automatically uploaded or analyzed. Use Capture frame only when the screen contains no passwords or restricted business data.</span></div>
    </section>
    <section className="panel live-chat">
-    <div className="sectiontitle"><div><h2><BrainCircuit size={17} style={{verticalAlign:'middle',marginRight:8}}/> SAP Conversation</h2><p>System-aware chat + session history</p></div><span className="status status-warn">LLM OFFLINE</span></div>
+    <div className="sectiontitle"><div><h2><BrainCircuit size={17} style={{verticalAlign:'middle',marginRight:8}}/> SAP Conversation</h2><p>System-aware chat + session history</p></div><span className={'status '+(connectionState==='available'?'status-ok':'status-warn')}>{connectionState==='available'?'AI CONNECTED':'AI NOT VERIFIED'}</span></div>
     <div className="live-tabs"><button className={activeTab==='chat'?'active':''} onClick={()=>setActiveTab('chat')}><MessageCircle size={15}/> Chat</button><button className={activeTab==='screen'?'active':''} onClick={()=>setActiveTab('screen')}><Camera size={15}/> Screen review</button><button className={activeTab==='memory'?'active':''} onClick={()=>setActiveTab('memory')}><FileText size={15}/> Memory</button></div>
     {activeTab==='chat'&&<div className="live-chatbox">
       <div className="chat-feed" role="log" aria-live="polite">
-       {!messages.length&&<div className="chat-empty"><BrainCircuit size={30}/><h3>Ready for your SAP question</h3><p>The secure LLM gateway still needs activation. You can use the guided diagnostic templates now, with session memory preserved in this tab.</p></div>}
-       {messages.map((m,i)=><article key={i} className={'chat-bubble '+(m.role==='user'?'human':'assistant')}><div className="chat-role">{m.role==='user'?'YOU':'LOCAL GUIDED CHECK · NOT LLM'}</div><div className="chat-text">{m.content}</div></article>)}
+       {!messages.length&&<div className="chat-empty"><BrainCircuit size={30}/><h3>Ready for your SAP question</h3><p>Ρώτησε τον AI consultant για το SAP σου. Η πρόσβαση στο μοντέλο απαιτεί ενεργοποίηση του ασφαλούς backend. Μπορείς να χρησιμοποιήσεις και τις τοπικές οδηγίες όσο είναι ανενεργό.</p></div>}
+       {messages.map((m,i)=><article key={i} className={'chat-bubble '+(m.role==='user'?'human':'assistant')}><div className="chat-role">{m.role==='user'?'YOU':m.role==='assistant'?'DEEPSEEK · AI SAP CONSULTANT':'LOCAL GUIDED CHECK · NOT LLM'}</div><div className="chat-text">{m.content}</div></article>)}
       </div>
-      <div className="quick-prompts">{CHOICES.map(([label,q])=><button key={label} onClick={()=>guideQuestion(q)}>{label}</button>)}</div>
-      <div className="chat-composer"><textarea rows={3} value={question} maxLength={1600} onChange={e=>setQuestion(e.target.value)} placeholder="Ρώτησε για το SAP transaction, dump, IDoc, πρόγραμμα…"/><div className="chat-actions"><button className="button ghost" onClick={exportContext}><ClipboardCopy size={14}/> Copy context</button><button className="button primary" disabled={!question.trim()} onClick={()=>guideQuestion(question)}><Send size={14}/> Guided check</button></div></div>
+      <div className="quick-prompts">{CHOICES.map(([label,q])=><button key={label} onClick={()=>setQuestion(q)}>{label}</button>)}</div>
+      <div className="chat-composer">
+       <textarea rows={3} value={question} maxLength={1600} onChange={e=>setQuestion(e.target.value)} placeholder="Ρώτησε τον SAP Consultant: Τι βλέπεις; Πού να πατήσω; Τι σημαίνει το σφάλμα;"/>
+       <div className="chat-capture">
+         <button className="button ghost" disabled={!stream} onClick={()=>{snapshot();setActiveTab('screen')}}><Camera size={14}/> Capture & mask</button>
+         <label className="checkbox"><input type="checkbox" disabled={!capture||!sensitiveOk} checked={attachScreen} onChange={e=>setAttachScreen(e.target.checked)}/> Send reviewed screen with next question</label>
+       </div>
+       {chatError&&<p className="error" role="alert">{chatError}</p>}
+       <div className="chat-actions">
+         <button className="button ghost" onClick={exportContext}><ClipboardCopy size={14}/> Copy context</button>
+         <button className="button ghost" disabled={!question.trim()||sending} onClick={()=>guideQuestion(question)}>Offline guide</button>
+         <button className="button primary" disabled={!question.trim()||sending} onClick={sendToAI}><Send size={14}/>{sending?'Thinking…':'Ask AI Consultant'}</button>
+       </div>
+      </div>
     </div>}
     {activeTab==='screen'&&<div className="screen-review">
       {!capture?<div className="chat-empty"><Camera size={28}/><h3>No screenshot captured</h3><p>Share SAP, then click Capture frame. You can black out sensitive sections before saving a local image.</p></div>:<>
-       <p className="note">Click «Mask regions», then drag over passwords, identities, customer details or other sensitive areas. Every black rectangle is applied locally to the image.</p>
+       <p className="note">Σκέπασε κωδικούς, στοιχεία πελατών και προσωπικά δεδομένα. Η εικόνα μεταδίδεται μόνο αν επιλέξεις «Send reviewed screen» και καλέσεις το AI. Η απόκρυψη αποτελεί δική σου ευθύνη.</p>
        <canvas className={'privacy-canvas '+(masking?'is-masking':'')} ref={previewRef} onPointerDown={down} onPointerUp={up} />
        <div className="chat-actions"><button className="button ghost" onClick={()=>setMasking(!masking)}><EyeOff size={15}/> {masking?'Stop masking':'Mask regions'}</button><button className="button ghost" onClick={download}><Download size={15}/> Save redacted JPG</button><button className="button ghost" onClick={()=>{setCapture('');setSensitiveOk(false)}}><Trash2 size={15}/> Remove</button></div>
        <label className="checkbox"><input type="checkbox" checked={sensitiveOk} onChange={e=>setSensitiveOk(e.target.checked)} /> I have reviewed the image and removed all sensitive data.</label>
-       <div className="info"><ShieldAlert size={17}/><span>The image remains in this browser; transmission to an AI provider is disabled until an authenticated multimodal endpoint is security-reviewed. You can save a redacted copy to submit manually after company approval.</span></div>
+       <div className="info"><ShieldAlert size={17}/><span>Κανονικά παραμένει τοπικά. Θα σταλεί στο DeepSeek μόνο με δική σου ρητή επιλογή στο Chat, μετά από έγκριση της εταιρικής πολιτικής. Το AI endpoint παραμένει απενεργοποιημένο μέχρι να ολοκληρωθεί η ασφαλής διαμόρφωσή του.</span></div>
       </>}
      </div>}
     {activeTab==='memory'&&<div className="memory-panel"><div className="min-row"><span>System / Client</span><b>{context.sid} / {context.client}</b></div><div className="min-row"><span>Environment</span><b>{context.env}</b></div><div className="min-row"><span>Transaction</span><b>{context.tcode||'Not specified'}</b></div><div className="min-row"><span>Messages</span><b>{messages.length}</b></div><p className="note">Memory is stored only in this browser tab (sessionStorage) under the selected account and system. Screenshots are not saved. This is not yet persistent encrypted enterprise memory.</p><button className="button danger" onClick={reset}><Trash2 size={15}/> Clear session memory</button></div>}
-    <div className="connection-strip"><span><WifiOff size={14}/> DeepSeek not connected</span><span><ShieldCheck size={14}/> No SAP writes</span></div>
+    <div className="connection-strip"><span><WifiOff size={14}/> AI access: {connectionState==='available'?'Verified this session':connectionState==='unavailable'?'Unavailable':'Not yet tested'}</span><span><ShieldCheck size={14}/> No SAP writes</span></div>
    </section>
   </div>
   {!!lastAction&&<p className="note">{lastAction}</p>}
