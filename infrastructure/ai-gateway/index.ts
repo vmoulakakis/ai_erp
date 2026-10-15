@@ -71,7 +71,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const payload = input as Record<string, unknown>;
   const prompt = payload.prompt;
   // Synthetic-only until project-specific compliance and data processing approval.
-  if (payload.classification !== "synthetic" || payload.model !== "deepseek-flash" ||
+  if (payload.classification !== "synthetic" || payload.model !== "deepseek-v4-flash" ||
       typeof prompt !== "string" || prompt.trim().length < 1 || prompt.length > 4000 ||
       /sk-[A-Za-z0-9]{16,}|-----BEGIN [A-Z ]+PRIVATE KEY-----/i.test(prompt)) {
     return json(400, { error: "unsupported_model_or_data_classification" });
@@ -112,7 +112,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       method: "POST",
       headers: { "authorization": "Bearer " + key, "content-type": "application/json" },
       body: JSON.stringify({
-        model: "deepseek-flash",
+        model: "deepseek-v4-flash",
         messages: [
           { role: "system", content: "Answer the synthetic test query accurately and concisely. Do not assume any real company records are available." },
           { role: "user", content: prompt },
@@ -131,7 +131,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const usage = data.usage && typeof data.usage === "object" ? data.usage as Record<string, unknown> : {};
     return json(200, {
       project,
-      model: "deepseek-flash",
+      model: "deepseek-v4-flash",
       content: typeof text === "string" ? text.slice(0, 12000) : "",
       usage: {
         prompt_tokens: Number(usage.prompt_tokens) || 0,
