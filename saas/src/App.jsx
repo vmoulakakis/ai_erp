@@ -110,7 +110,7 @@ export default function App(){
  const setNav=(id)=>{setPage(id);setMobileNav(false);setActiveItem(null)};
  const runLogin=async(e)=>{e.preventDefault();if(!supabase){setLoginMsg('Supabase login is not configured for this deployment.');return;}
   setLoginLoading(true);setLoginMsg('');try{
-   const {error}=await supabase.auth.signInWithOtp({email:loginEmail,options:{emailRedirectTo:window.location.origin}});
+   const {error}=await supabase.auth.signInWithOtp({email:loginEmail,options:{emailRedirectTo:'https://erp-intelligence-ai.vercel.app/'}});
    setLoginMsg(error?error.message:'Check your inbox for a secure sign-in link.');
   }catch{setLoginMsg('Sign-in is temporarily unavailable.')}finally{setLoginLoading(false)}
  };
