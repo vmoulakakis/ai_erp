@@ -39,3 +39,9 @@ Date: 2026-10-15. Status: SOURCE COMMITTED, EDGE API DEPLOYED BUT DISABLED, VERC
 - Configure provider spending limits and server-side per-user daily quota.
 - Run redacted synthetic screenshot E2E test, then authorized DEV screen session.
 - Implement signed local Companion for structured SAP GUI scripting read-only observability and allowlisted DEV/QAS diagnostic collectors; current screen share is view-only.
+
+## Security update (same day)
+- Edge Function `erp-copilot-chat` v2 now supports authenticated GET readiness with `{ready:false}` while the provider credential or switch is not configured.
+- React front-end now **checks readiness before sending any message or image**. If the endpoint is unavailable, it leaves content in browser session only and shows a clear offline explanation.
+- This does not verify production browser behavior because the new Vercel deployment is blocked by daily API quota.
+- The existing Vault `deepseek_api_key` is not automatically available as the Edge-only `ERP_COPILOT_DEEPSEEK_API_KEY`; no value was read or exposed.
