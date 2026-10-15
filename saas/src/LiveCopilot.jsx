@@ -44,6 +44,9 @@ export default function LiveCopilot({session,snap,onSignIn}){
  const [showMask,setShowMask]=useState(false);
  const [masking,setMasking]=useState(false);
  const [activeMask,setActiveMask]=useState(null);
+ const [sapSid,setSapSid]=useState('DEV');
+ const [sapClient,setSapClient]=useState('100');
+ const [sapEnv,setSapEnv]=useState('DEV');
  const [tcode,setTcode]=useState('');
  const [notes,setNotes]=useState('');
  const [question,setQuestion]=useState('');
@@ -52,7 +55,7 @@ export default function LiveCopilot({session,snap,onSignIn}){
  const [lastAction,setLastAction]=useState('');
  const [activeTab,setActiveTab]=useState('chat');
  const [showHelp,setShowHelp]=useState(false);
- const context=useMemo(()=>({sid:clean(snap.system_sid,12)||'DEV',client:clean(snap.system_client,3)||'100',env:clean(snap.environment,3)||'DEV',tcode:clean(tcode,30)}),[snap.system_sid,snap.system_client,snap.environment,tcode]);
+ const context=useMemo(()=>({sid:clean(sapSid,12)||'DEV',client:clean(sapClient,3)||'100',env:sapEnv,tcode:clean(tcode,30)}),[sapSid,sapClient,sapEnv,tcode]);
  const storageKey=PREFIX+'_'+(session?.user?.id||'demo')+'_'+context.sid+'_'+context.client;
  useEffect(()=>{
   try{const j=JSON.parse(sessionStorage.getItem(storageKey)||'{}');setMessages(Array.isArray(j.messages)?j.messages.slice(-24):[]);setNotes(clean(j.notes||'',1000));setTcode(clean(j.tcode||'',30))}catch{setMessages([]);setNotes('');}
@@ -117,6 +120,7 @@ export default function LiveCopilot({session,snap,onSignIn}){
     <div className="video-wrap live-player">{stream?<video ref={videoRef} autoPlay muted playsInline/>:<div className="video-empty"><Monitor size={48}/><h3>Open SAP DEV on your PC</h3><p>Click Share SAP window and choose only the SAP GUI window. SAP login stays in SAP GUI; the app cannot control keyboard or mouse inside the stream.</p></div>}</div>
     <canvas ref={canvasRef} style={{display:'none'}}/>
     {captureError&&<p className="error">{captureError}</p>}
+    <div className="live-target"><label>SID<input value={sapSid} onChange={e=>setSapSid(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12))} aria-label="SAP SID"/></label><label>Client<input value={sapClient} onChange={e=>setSapClient(e.target.value.replace(/[^0-9]/g,'').slice(0,3))} aria-label="SAP client"/></label><label>Environment<select value={sapEnv} onChange={e=>setSapEnv(e.target.value)}><option value="DEV">DEV</option><option value="QAS">QAS</option></select></label></div>
     <div className="live-context"><label>SAP Transaction / T-Code<input value={tcode} onChange={e=>setTcode(e.target.value.toUpperCase().replace(/[^A-Z0-9_/-]/g,'').slice(0,30))} placeholder="e.g. WE02, ST22, SE38" /></label>
     <label>Session notes (local only)<textarea value={notes} onChange={e=>setNotes(e.target.value.slice(0,1000))} rows={2} placeholder="Keep safe observations, no passwords or sensitive business details…"/></label></div>
     <div className="info"><ShieldCheck size={18}/><span>Browser screen sharing is local. No live screenshots are automatically uploaded or analyzed. Use Capture frame only when the screen contains no passwords or restricted business data.</span></div>
