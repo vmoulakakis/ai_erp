@@ -33,3 +33,16 @@
 .chat-composer .error{margin:8px 0 10px;font-size:10px;line-height:1.4}
 .chat-bubble .chat-role{font-weight:800}
 @media(max-width:700px){.chat-capture{flex-direction:column;align-items:flex-start}.chat-actions{justify-content:flex-start}}
+
+
+/* Provider-neutral LLM selection, secure status and compatible vision indicators. */
+.model-picker{padding:12px 13px;background:#0b2132;border:1px solid #24526a;border-radius:11px;margin:0 0 13px}
+.model-picker-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-weight:750;font-size:12px;color:#cdeaf4;margin-bottom:12px}
+.model-picker-title .status{margin-left:auto}
+.model-picker-fields{display:grid;grid-template-columns:minmax(100px,.85fr) minmax(160px,1.4fr);gap:10px}
+.model-picker-fields label,.model-custom{display:flex;flex-direction:column;gap:6px;font-size:10px;color:#8bb3ca;min-width:0}
+.model-picker select,.model-picker input{width:100%;border-radius:7px;border:1px solid #32647b;padding:10px 9px;color:#d8f1fa;background:#0c2d42;font-size:11px;min-width:0;outline:none}
+.model-picker select:focus,.model-picker input:focus{border-color:#4bdad7}
+.model-custom{margin-top:10px}
+.model-picker-note{color:#7db0c5;font-size:10px;line-height:1.55;margin-top:9px}
+@media(max-width:510px){.model-picker-fields{grid-template-columns:1fr}.model-picker-title .status{margin-left:0}}
