@@ -40,6 +40,16 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
  const [stream,setStream]=useState(null);
  const streamRef=useRef(null),videoRef=useRef(null),canvasRef=useRef(null),previewRef=useRef(null);
  const [captureError,setCaptureError]=useState('');
+ const SAFE_TCODES=['SM37','ST22','SM21','WE02','WE05','SE38','SE11','RZ11'];
+ const [copyStatus,setCopyStatus]=useState('');
+ const copyNavigation=async(tc)=>{
+   if(!SAFE_TCODES.includes(tc))return;
+   setTcode(tc);
+   try {
+     await navigator.clipboard.writeText('/n'+tc);
+     setCopyStatus('/n'+tc+' copied. Paste it into the SAP GUI command field and press Enter. No remote command has been executed.');
+   }catch{setCopyStatus('Clipboard not available. Manually type /n'+tc+' in the SAP command field.');}
+ };
  const [capture,setCapture]=useState('');
  const [showMask,setShowMask]=useState(false);
  const [masking,setMasking]=useState(false);
@@ -184,6 +194,12 @@ export default function LiveCopilot({session,snap,onSignIn,supabase}){
     <canvas ref={canvasRef} style={{display:'none'}}/>
     {captureError&&<p className="error">{captureError}</p>}
     <div className="live-target"><label>SID<input value={sapSid} onChange={e=>setSapSid(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,12))} aria-label="SAP SID"/></label><label>Client<input value={sapClient} onChange={e=>setSapClient(e.target.value.replace(/[^0-9]/g,'').slice(0,3))} aria-label="SAP client"/></label><label>Environment<select value={sapEnv} onChange={e=>setSapEnv(e.target.value)}><option value="DEV">DEV</option><option value="QAS">QAS</option></select></label></div>
+    <div className="tcode-navigation">
+      <div className="tcode-header"><b>Safe SAP transaction navigator</b><span>MANUAL · NO SAP WRITES</span></div>
+      <p>Choose an approved display/diagnostic transaction. Copy the navigation command, then paste it into SAP GUI. The browser does not control SAP.</p>
+      <div className="tcode-choices">{SAFE_TCODES.map(tc=><button key={tc} className="tcode-choice" onClick={()=>copyNavigation(tc)} title={'Copy /n'+tc}>{tc}</button>)}</div>
+      {copyStatus&&<p className="note" role="status">{copyStatus}</p>}
+    </div>
     <div className="live-context"><label>SAP Transaction / T-Code<input value={tcode} onChange={e=>setTcode(e.target.value.toUpperCase().replace(/[^A-Z0-9_/-]/g,'').slice(0,30))} placeholder="e.g. WE02, ST22, SE38" /></label>
     <label>Session notes (local only)<textarea value={notes} onChange={e=>setNotes(e.target.value.slice(0,1000))} rows={2} placeholder="Keep safe observations, no passwords or sensitive business details…"/></label></div>
     <div className="info"><ShieldCheck size={18}/><span>Browser screen sharing is local. No live screenshots are automatically uploaded or analyzed. Use Capture frame only when the screen contains no passwords or restricted business data.</span></div>
