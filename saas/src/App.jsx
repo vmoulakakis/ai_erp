@@ -1,4 +1,5 @@
 import LiveCopilot from './LiveCopilot.jsx';
+import {readSapDiagnostic} from './sapEvidence.js';
 import React, {useEffect,useMemo,useRef,useState} from 'react';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -12,6 +13,7 @@ import {
 const sbUrl=import.meta.env.VITE_SUPABASE_URL;
 const sbKey=import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const supabase=sbUrl&&sbKey?createClient(sbUrl,sbKey,{auth:{detectSessionInUrl:true}}):null;
+const NO_DATA={system_sid:'DEV',system_client:'100',environment:'DEV',release:'Unverified',source:'NO_SAP_DATA',metrics:{},is_synthetic:false};
 const demo={
  tenant_id:'pilot-demo',system_sid:'Q01',system_client:'100',environment:'QAS',
  release:'SAP_BASIS 740 · SYNTHETIC',source:'SYNTHETIC_FIXTURE',
@@ -67,7 +69,9 @@ export default function App(){
  const [remoteStatus,setRemoteStatus]=useState('not_loaded');
  const [selected,setSelected]=useState('Q01');
  const [local,setLocal]=useState(null);
+ const [showDemo,setShowDemo]=useState(false);
  const [fileError,setFileError]=useState('');
+ const [importInfo,setImportInfo]=useState('');
  const [consent,setConsent]=useState(false);
  const [activeItem,setActiveItem]=useState(null);
  const [query,setQuery]=useState('');
@@ -95,8 +99,8 @@ export default function App(){
  },[session]);
  useEffect(()=>{if(videoRef.current&&stream){videoRef.current.srcObject=stream;videoRef.current.play().catch(()=>{});}},[stream,page]);
  useEffect(()=>()=>{for(const track of streamRef.current?.getTracks()||[])track.stop();},[]);
- const selectedRemote=remote.find(s=>s.system_sid===selected);
- const snap=local||selectedRemote||demo;
+ const selectedRemote=showDemo?remote.find(s=>s.system_sid===selected):null;
+ const snap=local||selectedRemote||(showDemo?demo:NO_DATA);
  const metrics=snap.metrics||{};
  const findings=useMemo(()=>{
   const a=[];
@@ -117,25 +121,16 @@ export default function App(){
  const logout=async()=>{await supabase?.auth.signOut();setSession(null);setAuthVisible(false)};
  const loadJson=async(e)=>{
   const f=e.target.files?.[0];if(!f)return;
-  setFileError('');
-  if(!consent){setFileError('Confirm authorization and removal of sensitive fields.');return}
-  if(f.size>65536||!f.name.toLowerCase().endsWith('.json')){setFileError('Only approved aggregate JSON up to 64 KB is accepted.');return}
-  try{
-   const parsed=JSON.parse(await f.text());
-   if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('Invalid object');
-   const raw=parsed.metrics??parsed;
-   if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('No metrics');
-   const allow=['failedJobs24h','idocErrors24h','customAbapObjects','dumps7d'];
-   const m={};
-   for(const [k,v] of Object.entries(raw)){
-    if(!allow.includes(k))throw new Error('Unsupported field: '+k);
-    if(typeof v!=='number'||!Number.isFinite(v)||v<0||!Number.isInteger(v)||v>10000000)throw new Error('Invalid count for '+k);
-    m[k]=v;
-   }
-   if(!Object.keys(m).length)throw new Error('No supported metrics');
-   setLocal({...demo,metrics:m,source:'LOCAL_CUSTOMER_DECLARED_PREVIEW',system_sid:'LOCAL',release:'Customer-declared aggregate',is_synthetic:false});
-   setSelected('LOCAL');setPage('technical');
-  }catch(e){setFileError(e.message||'Invalid file')}finally{e.target.value=''}
+  setFileError('');setImportInfo('');
+  try {
+   if(!consent)throw Error('Confirm that this SAP export is authorized and contains no confidential/personal records.');
+   if(f.size>1048576)throw Error('Maximum file size is 1 MB.');
+   const parsed=readSapDiagnostic(await f.text(),f.name);
+   setLocal(parsed);setShowDemo(false);setSelected(parsed.system_sid);
+   setImportInfo('Accepted '+parsed.system_sid+' / client '+parsed.system_client+' · '+Object.keys(parsed.metrics).length+' approved aggregates. Local browser analysis; no cloud upload.');
+   setPage('technical');
+  }catch(err){setFileError(String(err?.message||'Invalid SAP diagnostic export'))}
+  finally{e.target.value=''}
  };
  const stopShare=()=>{streamRef.current?.getTracks().forEach(t=>t.stop());streamRef.current=null;setStream(null);setCaptureError('')};
  const startShare=async()=>{
@@ -168,7 +163,7 @@ export default function App(){
   '\n\nEvidence boundary: Current environment is '+snap.system_sid+'/'+snap.environment+
   ', source '+snap.source+'. This is guidance, NOT a live AI response or executed SAP action.');
  };
- const dataLabel=snap.is_synthetic?'SYNTHETIC ONLY':'LOCAL · UNVERIFIED';
+ const dataLabel=snap.source==='NO_SAP_DATA'?'NO SAP DATA':snap.is_synthetic?'SYNTHETIC DEMO':'LOCAL SAP EXPORT · UNVERIFIED';
  const topHeader=()=>{
   const titles={mission:['Mission Control','360° ERP intelligence overview'],business:['Business Assessment','Performance, cash, fulfillment and working capital'],technical:['Technical Intelligence','Actual collected scope, trends and exceptions'],modules:['Module Coverage','Assessed versus not assessed'],findings:['Findings & Actions','Evidence-first diagnostic decisions'],live:['Live SAP Workspace','View your SAP GUI with explicit local consent'],advisor:['AI SAP Consultant','Safe read-only investigation planner'],imports:['Hybrid Assessment','Upload an approved aggregate or prepare the DEV collector'],reports:['Reports & History','Export traceable assessments'],settings:['Workspace & Security','Authentication and connectivity status']};
   return <div className="page-heading"><div className="crumb">WORKSPACE <span>/</span> {page.toUpperCase()}</div><h1>{titles[page][0]}</h1><p>{titles[page][1]}</p></div>;
@@ -177,7 +172,7 @@ export default function App(){
   <Tile title="Failed jobs (24h)" value={metrics.failedJobs24h===undefined?'Not collected':fmt(metrics.failedJobs24h)} hint="Aggregated SM37 evidence" icon={Activity}/>
   <Tile title="IDoc exceptions" value={metrics.idocErrors24h===undefined?'Not collected':fmt(metrics.idocErrors24h)} hint="Approved status counts" icon={Network}/>
   <Tile title="Custom ABAP objects" value={metrics.customAbapObjects===undefined?'Not collected':fmt(metrics.customAbapObjects)} hint="Inventory, not a quality score" icon={Blocks}/>
-  <Tile title="Dumps (7d)" value={metrics.dumps7d===undefined?'Not collected':fmt(metrics.dumps7d)} hint="Only if sanitized ST22 provided" icon={Server}/>
+  <Tile title="Dumps (7d)" value={(metrics.shortDumps7d??metrics.dumps7d)===undefined?'Not collected':fmt(metrics.shortDumps7d??metrics.dumps7d)} hint="Only if sanitized ST22 provided" icon={Server}/>
  </div>;
  const findingsView=<div className="listpanel">{findings.length?findings.map(f=><button type="button" className={'finding '+(activeItem===f.id?'selected':'')} key={f.id} onClick={()=>setActiveItem(activeItem===f.id?null:f.id)}>
   <span className={'severity '+f.level.toLowerCase()}>{f.level}</span><div className="findingmain"><b>{f.title}</b><p>{f.module} · {f.evidence}</p>
@@ -203,11 +198,11 @@ export default function App(){
    <div className="content">
     {topHeader()}
     {(page==='mission'||page==='business')&&<>
-     <div className="banner"><div><span className="eyebrow">PRODUCT STATUS · CONTROLLED PILOT</span><h3>Know your ERP. Diagnose with evidence. Act with confidence.</h3><p>Business figures below are illustrative, not live SAP financials. Technical readings are synthetic pilot or customer-declared aggregates.</p></div><button onClick={()=>setNav('imports')} className="button primary">Start assessment <ArrowRight size={17}/></button></div>
-     <SectionTitle title="Business performance" subtitle="Illustrative executive dataset — live business data not connected"><Status tone="warn">DEMO METRICS</Status></SectionTitle>
-     <div className="metric-grid">{business.map(m=><Tile key={m.id} title={m.title} value={m.value} hint={m.subtitle} delta={m.delta} icon={m.icon}/>)}</div>
+     <div className="banner"><div><span className="eyebrow">REAL DATA MODE · CONTROLLED PILOT</span><h3>Know your ERP. Diagnose with evidence. Act with confidence.</h3><p>No SAP connection exists yet. Import approved DEV/QAS exports for actual diagnostic metrics. Synthetic demo is opt-in only.</p></div><button onClick={()=>setNav('imports')} className="button primary">Import SAP evidence <ArrowRight size={17}/></button></div>
+     <SectionTitle title="Business performance" subtitle="Business KPIs require separately authorized production aggregates"><Status tone="warn">{showDemo?'DEMO METRICS':'NO BUSINESS DATA'}</Status></SectionTitle>
+     <div className="metric-grid">{business.map(m=><Tile key={m.id} title={m.title} value={showDemo?m.value:'Not collected'} hint={showDemo?m.subtitle:'Requires authorized production business aggregates'} delta={showDemo?m.delta:undefined} icon={m.icon}/>)}</div>
      <div className="two-col">
-      <div className="panel"><SectionTitle title="Where to focus" subtitle="Prioritized diagnostic opportunities"/>
+      <div className="panel"><SectionTitle title="Where to focus" subtitle="Only measured evidence can justify findings"/>{!showDemo&&<div className="info"><ShieldCheck size={19}/><span>Business process health has not been assessed. The items below are generic guidance templates, not detected problems.</span></div>}
        <div className="workstream"><span className="number">01</span><div><strong>Improve receivables visibility</strong><p>Validate overdue receivables, clearing rates and DSO calculation against FI extracts.</p></div><Status>FI/CO</Status></div>
        <div className="workstream"><span className="number">02</span><div><strong>Investigate delivery exceptions</strong><p>Separate late delivery events from unresolved order and IDoc statuses.</p></div><Status>SD</Status></div>
        <div className="workstream"><span className="number">03</span><div><strong>Measure slow-moving inventory</strong><p>Use approved plant-level stock valuation and usage cohorts.</p></div><Status>MM</Status></div>
@@ -224,7 +219,7 @@ export default function App(){
     {page==='findings'&&<div className="panel"><SectionTitle title="Findings & action plan" subtitle="Select a finding to see evidence and the next non-destructive diagnostic step"/>{findingsView}</div>}
     {page==='live'&&<LiveCopilot session={session} snap={snap} supabase={supabase} onSignIn={()=>setAuthVisible(true)}/>}
     {page==='advisor'&&<div className="two-col"><div className="panel"><SectionTitle title="Ask the SAP Consultant" subtitle="Offline diagnostic planner · AI provider not connected to this deployment"/><label className="field-label" htmlFor="sap-question">What do you need to investigate?</label><textarea id="sap-question" rows={5} placeholder="Example: Why are IDocs in error in QAS client 100?" value={query} onChange={e=>setQuery(e.target.value)} maxLength={1500}/><button className="button primary" onClick={generatePlan} disabled={!query.trim()}>Prepare safe investigation <ArrowRight size={16}/></button>{plan&&<pre className="plan">{plan}</pre>}</div><div className="panel"><SectionTitle title="Connected intelligence" subtitle="Source-aware, never guessing"/><div className="workstream"><Status tone="warn">DISABLED</Status><div><b>DeepSeek inference</b><p>Vault key exists in Supabase, but the shared gateway remains disabled pending scoped application credentials and limits.</p></div></div><div className="workstream"><Status tone="warn">MISSING</Status><div><b>Read-only SAP tool calls</b><p>The on-prem Windows/SAP connector must be installed and authorized in DEV/QAS.</p></div></div><div className="workstream"><Status tone="ok">AVAILABLE</Status><div><b>Evidence-based templates</b><p>Deterministic investigation instructions are available without API calls.</p></div></div></div></div>}
-    {page==='imports'&&<div className="two-col"><div className="panel"><SectionTitle title="Level 1 · Approved file import" subtitle="Local preview in your browser, no upload to cloud"/><div className="steps">{['Select system','Review data scope','Upload aggregates','Inspect findings'].map((x,i)=><div key={x}><span>{i+1}</span>{x}</div>)}</div><p className="note">Accepted JSON keys: failedJobs24h, idocErrors24h, customAbapObjects, dumps7d. Only non-negative integer aggregates, maximum 64 KB.</p><label className="checkbox"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I am authorized and have removed sensitive or personal data.</label><label className={'uploadbutton '+(!consent?'disabled':'')}><Upload size={19}/> Select approved aggregate JSON<input disabled={!consent} type="file" accept=".json,application/json" onChange={loadJson}/></label>{fileError&&<div className="error">{fileError}</div>}</div><div className="panel"><SectionTitle title="Level 2 · DEV/QAS SAP Collector" subtitle="To be implemented with SAP BASIS approval"/>{[['System','System → Status'],['Background jobs','SM37 approved aggregates'],['IDoc monitoring','WE02 / WE05 sanitized totals'],['Custom ABAP','TADIR Z/Y inventory'],['Dumps (optional)','ST22 categories'],['Table statistics (optional)','DB02 / existing TAANA']].map(x=><div className="min-row" key={x[0]}><span>{x[0]}</span><small>{x[1]}</small></div>)}<div className="info"><ShieldCheck size={19}/><span>Transport installation and read access must be approved by the corporate SAP owner. There is no live collector connected yet.</span></div></div></div>}
+    {page==='imports'&&<div className="two-col"><div className="panel"><SectionTitle title="Level 1 · Approved file import" subtitle="Local preview in your browser, no upload to cloud"/><div className="steps">{['Select system','Review data scope','Upload aggregates','Inspect findings'].map((x,i)=><div key={x}><span>{i+1}</span>{x}</div>)}</div><p className="note">Versioned SAP_DIAG_V1 .txt or schemaVersion=1 .json; max 1 MB. Supports 15 aggregate metrics, validates SID/client and DEV/QAS, browser-only processing.</p><label className="checkbox"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I am authorized and have removed sensitive or personal data.</label><label className={'uploadbutton '+(!consent?'disabled':'')}><Upload size={19}/> Select authorized SAP .txt / .json<input disabled={!consent} type="file" accept=".txt,.json,text/plain,application/json" onChange={loadJson}/></label>{fileError&&<div className="error">{fileError}</div>}{importInfo&&<p className="note">{importInfo}</p>}</div><div className="panel"><SectionTitle title="Level 2 · DEV/QAS SAP Collector" subtitle="To be implemented with SAP BASIS approval"/>{[['System','System → Status'],['Background jobs','SM37 approved aggregates'],['IDoc monitoring','WE02 / WE05 sanitized totals'],['Custom ABAP','TADIR Z/Y inventory'],['Dumps (optional)','ST22 categories'],['Table statistics (optional)','DB02 / existing TAANA']].map(x=><div className="min-row" key={x[0]}><span>{x[0]}</span><small>{x[1]}</small></div>)}<div className="info"><ShieldCheck size={19}/><span>Transport installation and read access must be approved by the corporate SAP owner. There is no live collector connected yet.</span></div></div></div>}
     {page==='reports'&&<div className="two-col"><div className="panel"><SectionTitle title="Assessment report" subtitle="Current snapshot only"/><div className="report-block"><FileCheck2 size={38}/><h3>{snap.system_sid} / {snap.environment}</h3><p>{snap.source}</p><Status tone={snap.is_synthetic?'warn':'neutral'}>{dataLabel}</Status></div><button className="button primary" onClick={exportReport}><ArrowDownToLine size={17}/> Download JSON report</button></div><div className="panel"><SectionTitle title="Snapshot history" subtitle="JWT-protected Supabase synthetic pilot"/><div className="min-row"><span>Database state</span><Status tone={remoteStatus==='verified'?'ok':'warn'}>{remoteStatus.replaceAll('_',' ').toUpperCase()}</Status></div>{remote.map(x=><button onClick={()=>{setLocal(null);setSelected(x.system_sid);setPage('technical')}} className="snapshot" key={x.system_sid+x.received_at}><Server size={16}/><span>{x.system_sid} · {x.environment} · {x.source}</span><ArrowRight size={15}/></button>)}{!remote.length&&<p className="note">Sign in to query the authenticated synthetic pilot. No customer data are stored in this workspace.</p>}</div></div>}
     {page==='settings'&&<div className="two-col"><div className="panel"><SectionTitle title="Identity" subtitle="Supabase Auth sign-in"/><div className="min-row"><span>Account</span><b>{session?.user?.email||'Demo visitor'}</b></div><div className="min-row"><span>Authentication</span><Status tone={session?'ok':'warn'}>{session?'SIGNED IN':'DEMO MODE'}</Status></div><div className="min-row"><span>Data policy</span><b>Synthetic pilot only</b></div><button className="button ghost" onClick={()=>setAuthVisible(true)}>Sign in with email <ArrowRight size={16}/></button></div><div className="panel"><SectionTitle title="Connection checklist" subtitle="Zero false connectivity claims"/>{[['Supabase Auth',session?'User verified':'Not signed in'],['Pilot synthetic API',remoteStatus==='verified'?'Authenticated':'Not verified'],['SAP DEV Companion','Not installed'],['SAP GUI view',stream?'Local window active':'Not shared'],['Shared DeepSeek Gateway','Disabled by policy'],['Production SAP','No connection']].map(x=><div className="min-row" key={x[0]}><span>{x[0]}</span><small>{x[1]}</small></div>)}</div></div>}
     <footer className="footer">ERP Intelligence AI · Secure staged SaaS foundation v0.7 · <b>{dataLabel}</b> · No live SAP access, production data or automatic write operations</footer>
