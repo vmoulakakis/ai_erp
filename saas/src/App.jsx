@@ -113,6 +113,10 @@ export default function App(){
   const failed=Number(metrics.failedJobs24h);
   const idocs=Number(metrics.idocErrors24h);
   if(Number.isFinite(failed)&&failed>0)a.push({id:'jobs',title:'Failed background jobs require investigation',module:'BASIS',level:failed>10?'HIGH':'MEDIUM',evidence:failed+' failed jobs in a 24h aggregate',explanation:'Inspect SM37 job logs and program dependencies. A count does not confirm the underlying cause.',action:'Collect sanitized failed-job status and related ST22 dump summary.'});
+  const dumps=Number(metrics.shortDumps7d??metrics.dumps7d);
+  if(Number.isFinite(dumps)&&dumps>0)a.push({id:'dumps',title:'SAP short dumps require investigation',module:'BASIS',level:dumps>=7?'HIGH':'MEDIUM',evidence:dumps+' observed ST22 dumps in seven days',explanation:'The approved aggregate indicates exceptions, not a confirmed root cause.',action:'Open ST22 in the correct DEV/QAS client, group runtime errors and affected programs; do not change ABAP automatically.'});
+  const billing=Number(metrics.sdBillingErrors);
+  if(Number.isFinite(billing)&&billing>0)a.push({id:'billing',title:'SD billing exceptions',module:'SD',level:billing>=10?'HIGH':'MEDIUM',evidence:billing+' user-provided billing exceptions',explanation:'Billing totals alone cannot prove lost sales or accounting impact.',action:'Review the VFX3 log and approved document statuses; escalate FI/SD checks after root-cause evidence.'});
   if(Number.isFinite(idocs)&&idocs>0)a.push({id:'idocs',title:'IDoc processing exceptions',module:'IDOC',level:idocs>100?'HIGH':'MEDIUM',evidence:idocs+' IDocs in an error category',explanation:'Inspect message type, direction and status details; do not infer business order loss from counts.',action:'Collect approved WE02/WE05 status totals by direction and message type.'});
   if(Number.isFinite(Number(metrics.customAbapObjects)))a.push({id:'abap',title:'Custom ABAP inventory coverage only',module:'Z/Y',level:'INFO',evidence:fmt(metrics.customAbapObjects)+' custom objects inventoried',explanation:'Object counts alone do not establish code quality or S/4 readiness.',action:'Import authorized ATC results for actionable code findings.'});
   return a;
@@ -217,7 +221,7 @@ export default function App(){
      </div>
     </>}
     {page==='technical'&&<>
-      <div className="banner slim"><div><span className="eyebrow">EVIDENCE CONTEXT</span><h3>{snap.system_sid} · {snap.environment} · Client {snap.system_client}</h3><p>{snap.release} · {snap.source} · No authenticated live SAP collector connected</p></div><Status tone={snap.is_synthetic?'warn':'neutral'}>{dataLabel}</Status></div>
+      <div className="banner slim"><div><span className="eyebrow">EVIDENCE CONTEXT</span><h3>{snap.system_sid} · {snap.environment} · Client {snap.system_client}</h3><p>{snap.release} · {snap.source} · {snap.captured_at?'Observed: '+new Date(snap.captured_at).toLocaleString('el-GR')+' · ':''}No authenticated live SAP collector connected</p></div><Status tone={snap.is_synthetic?'warn':'neutral'}>{dataLabel}</Status></div>
       {diagnosticTiles}
       <div className="two-col"><div className="panel"><SectionTitle title="Detected signals" subtitle="Deterministic rules applied to available counters"/>{findingsView}</div><div className="panel"><SectionTitle title="What is missing?" subtitle="No green health status without evidence"/>{modules.filter(x=>moduleStatus(x)!=='Partial').slice(0,7).map(x=><div key={x[1]} className="min-row"><span>{x[0]}</span><Status tone="neutral">NOT ASSESSED</Status></div>)}</div></div>
     </>}
